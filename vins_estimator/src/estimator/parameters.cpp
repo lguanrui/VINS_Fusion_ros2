@@ -19,6 +19,10 @@ std::vector<Eigen::Vector3d> TIC;
 
 Eigen::Vector3d G{0.0, 0.0, 9.8};
 
+int USE_GPU;
+int USE_GPU_ACC_FLOW;
+int USE_GPU_CERES;
+
 double BIAS_ACC_THRESHOLD;
 double BIAS_GYR_THRESHOLD;
 double SOLVER_TIME;
@@ -48,17 +52,18 @@ int FLOW_BACK;
 
 
 template <typename T>
-T readParam(ros::NodeHandle &n, std::string name)
+T readParam(rclcpp::Node::SharedPtr n, std::string name)
 {
     T ans;
-    if (n.getParam(name, ans))
+    if (n->get_parameter(name, ans))
     {
-        ROS_INFO_STREAM("Loaded " << name << ": " << ans);
+        ROS_INFO("Loaded %s: ", name);
+        std::cout << ans << std::endl;
     }
     else
     {
-        ROS_ERROR_STREAM("Failed to load " << name);
-        n.shutdown();
+        ROS_ERROR("Failed to load %s", name);
+        rclcpp::shutdown();
     }
     return ans;
 }
@@ -68,7 +73,7 @@ void readParameters(std::string config_file)
     FILE *fh = fopen(config_file.c_str(),"r");
     if(fh == NULL){
         ROS_WARN("config_file dosen't exist; wrong config_file path");
-        ROS_BREAK();
+        // ROS_BREAK();
         return;          
     }
     fclose(fh);
@@ -88,6 +93,10 @@ void readParameters(std::string config_file)
     FLOW_BACK = fsSettings["flow_back"];
 
     MULTIPLE_THREAD = fsSettings["multiple_thread"];
+
+    USE_GPU = fsSettings["use_gpu"];
+    USE_GPU_ACC_FLOW = fsSettings["use_gpu_acc_flow"];
+    USE_GPU_CERES = fsSettings["use_gpu_ceres"];
 
     USE_IMU = fsSettings["imu"];
     printf("USE_IMU: %d\n", USE_IMU);
@@ -181,9 +190,9 @@ void readParameters(std::string config_file)
     TD = fsSettings["td"];
     ESTIMATE_TD = fsSettings["estimate_td"];
     if (ESTIMATE_TD)
-        ROS_INFO_STREAM("Unsynchronized sensors, online estimate time offset, initial td: " << TD);
+        ROS_INFO("Unsynchronized sensors, online estimate time offset, initial td: %f", TD);
     else
-        ROS_INFO_STREAM("Synchronized sensors, fix time offset: " << TD);
+        ROS_INFO("Synchronized sensors, fix time offset: %f", TD);
 
     ROW = fsSettings["image_height"];
     COL = fsSettings["image_width"];

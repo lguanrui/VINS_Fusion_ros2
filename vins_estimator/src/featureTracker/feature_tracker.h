@@ -11,6 +11,9 @@
 
 #pragma once
 
+#define GPU_MODE 0
+
+
 #include <cstdio>
 #include <iostream>
 #include <queue>
@@ -18,6 +21,12 @@
 #include <csignal>
 #include <opencv2/opencv.hpp>
 #include <eigen3/Eigen/Dense>
+
+#if GPU_MODE
+#include <opencv2/cudaoptflow.hpp>
+#include <opencv2/cudaimgproc.hpp>
+#include <opencv2/cudaarithm.hpp>
+#endif
 
 #include "camodocal/camera_models/CameraFactory.h"
 #include "camodocal/camera_models/CataCamera.h"
@@ -29,6 +38,12 @@ using namespace std;
 using namespace camodocal;
 using namespace Eigen;
 
+
+#define ROS_INFO RCUTILS_LOG_INFO
+#define ROS_WARN RCUTILS_LOG_WARN
+#define ROS_DEBUG RCUTILS_LOG_DEBUG
+#define ROS_ERROR RCUTILS_LOG_ERROR
+
 bool inBorder(const cv::Point2f &pt);
 void reduceVector(vector<cv::Point2f> &v, vector<uchar> status);
 void reduceVector(vector<int> &v, vector<uchar> status);
@@ -39,6 +54,7 @@ public:
     FeatureTracker();
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> trackImage(double _cur_time, const cv::Mat &_img, const cv::Mat &_img1 = cv::Mat());
     void setMask();
+    void addPoints();
     void readIntrinsicParameter(const vector<string> &calib_file);
     void showUndistortion(const string &name);
     void rejectWithF();

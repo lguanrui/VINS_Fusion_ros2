@@ -58,6 +58,7 @@ void Estimator::clearState()
         if (pre_integrations[i] != nullptr)
         {
             delete pre_integrations[i];
+            pre_integrations[i] = nullptr;
         }
         pre_integrations[i] = nullptr;
     }
@@ -77,9 +78,15 @@ void Estimator::clearState()
     all_image_frame.clear();
 
     if (tmp_pre_integration != nullptr)
+    {
         delete tmp_pre_integration;
+        tmp_pre_integration = nullptr;
+    }
     if (last_marginalization_info != nullptr)
+    {
         delete last_marginalization_info;
+        last_marginalization_info = nullptr;
+    }
 
     tmp_pre_integration = nullptr;
     last_marginalization_info = nullptr;
@@ -215,6 +222,8 @@ void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vec
 
 void Estimator::inputFeature(double t, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &featureFrame)
 {
+    ROS_ERROR("deprecated at VINS-Fusion");
+    assert(0);
     mBuf.lock();
     featureBuf.push(make_pair(t, featureFrame));
     mBuf.unlock();
@@ -232,20 +241,25 @@ bool Estimator::getIMUInterval(double t0, double t1, vector<pair<double, Eigen::
         printf("not receive imu\n");
         return false;
     }
-    //printf("get imu from %f %f\n", t0, t1);
-    //printf("imu fornt time %f   imu end time %f\n", accBuf.front().first, accBuf.back().first);
+    // printf("get imu from %f %f\n", t0, t1);
+    // printf("imu fornt time %f   imu end time %f\n", accBuf.front().first, accBuf.back().first);
     if(t1 <= accBuf.back().first)
     {
         while (accBuf.front().first <= t0)
         {
+            // std::cout << "t_imu: " << std::fixed << accBuf.front().first << "  t_0: " << std::fixed << t0 << "   gyr_buf size: " << gyrBuf.size() << std::endl;
+            // std::cout << "1) acc pop" << std::endl;
             accBuf.pop();
+            // std::cout << "1) gyr pop" << std::endl;
             gyrBuf.pop();
         }
         while (accBuf.front().first < t1)
         {
             accVector.push_back(accBuf.front());
+            // std::cout << "2) acc pop" << std::endl;
             accBuf.pop();
             gyrVector.push_back(gyrBuf.front());
+            // std::cout << "2) gyr pop" << std::endl;
             gyrBuf.pop();
         }
         accVector.push_back(accBuf.front());
@@ -271,13 +285,16 @@ void Estimator::processMeasurements()
 {
     while (1)
     {
-        //printf("process measurments\n");
+        // cout << "[processMeasurements]  loop - start" << endl;
+
         pair<double, map<int, vector<pair<int, Eigen::Matrix<double, 7, 1> > > > > feature;
         vector<pair<double, Eigen::Vector3d>> accVector, gyrVector;
         if(!featureBuf.empty())
         {
+            // cout << "1" << endl;
             feature = featureBuf.front();
             curTime = feature.first + td;
+            // std::cout << "t0: " << std::fixed << curTime << std::endl;
             while(1)
             {
                 if ((!USE_IMU  || IMUAvailable(feature.first + td)))
@@ -291,13 +308,19 @@ void Estimator::processMeasurements()
                     std::this_thread::sleep_for(dura);
                 }
             }
+            // cout << "2" << endl;
             mBuf.lock();
             if(USE_IMU)
+            {
+                // cout << "2-1)" << endl;
                 getIMUInterval(prevTime, curTime, accVector, gyrVector);
+                // cout << "2-2)" << endl;
+            }
 
             featureBuf.pop();
             mBuf.unlock();
 
+            // cout << "3" << endl;
             if(USE_IMU)
             {
                 if(!initFirstPoseFlag)
@@ -314,24 +337,44 @@ void Estimator::processMeasurements()
                     processIMU(accVector[i].first, dt, accVector[i].second, gyrVector[i].second);
                 }
             }
+            // cout << "4" << endl;
+
             mProcess.lock();
             processImage(feature.second, feature.first);
             prevTime = curTime;
 
+            // cout << "5" << endl;
+
             printStatistics(*this, 0);
 
-            std_msgs::Header header;
+            std_msgs::msg::Header header;
             header.frame_id = "world";
-            header.stamp = ros::Time(feature.first);
+
+            int sec_ts = (int)feature.first;
+            uint nsec_ts = (uint)((feature.first - sec_ts) * 1e9);
+            header.stamp.sec = sec_ts;
+            header.stamp.nanosec = nsec_ts;
 
             pubOdometry(*this, header);
+            // cout << "5-1" << endl;
             pubKeyPoses(*this, header);
+            // cout << "5-2" << endl;
             pubCameraPose(*this, header);
+            // cout << "5-3" << endl;
             pubPointCloud(*this, header);
+            // cout << "5-4" << endl;
             pubKeyframe(*this);
+            // cout << "5-5" << endl;
             pubTF(*this, header);
+            // cout << "5-6" << endl;
             mProcess.unlock();
+
+
+            // cout << "6" << endl;
+
+            // assert(0);
         }
+        // cout << "[processMeasurements]  loop - end" << endl;
 
         if (! MULTIPLE_THREAD)
             break;
@@ -410,6 +453,10 @@ void Estimator::processIMU(double t, double dt, const Vector3d &linear_accelerat
 
 void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, const double header)
 {
+
+
+    cout << std::fixed << header << endl;
+
     ROS_DEBUG("new image coming ------------------------------------------");
     ROS_DEBUG("Adding feature points %lu", image.size());
     if (f_manager.addFeatureCheckParallax(frame_count, image, td))
@@ -443,13 +490,14 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
             if (initial_ex_rotation.CalibrationExRotation(corres, pre_integrations[frame_count]->delta_q, calib_ric))
             {
                 ROS_WARN("initial extrinsic rotation calib success");
-                ROS_WARN_STREAM("initial extrinsic rotation: " << endl << calib_ric);
+                // ROS_WARN_STREAM("initial extrinsic rotation: " << endl << calib_ric);
                 ric[0] = calib_ric;
                 RIC[0] = calib_ric;
                 ESTIMATE_EXTRINSIC = 1;
             }
         }
     }
+
 
     if (solver_flag == INITIAL)
     {
@@ -536,11 +584,15 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     }
     else
     {
-        TicToc t_solve;
         if(!USE_IMU)
             f_manager.initFramePoseByPnP(frame_count, Ps, Rs, tic, ric);
         f_manager.triangulate(frame_count, Ps, Rs, tic, ric);
+
+        // optimization
+        TicToc t_solve;
         optimization();
+        ROS_INFO("solver costs: %f [ms]", t_solve.toc());
+
         set<int> removeIndex;
         outliersRejection(removeIndex);
         f_manager.removeOutlier(removeIndex);
@@ -550,7 +602,6 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
             predictPtsInNextFrame();
         }
             
-        ROS_DEBUG("solver costs: %fms", t_solve.toc());
 
         if (failureDetection())
         {
@@ -775,8 +826,8 @@ bool Estimator::visualInitialAlign()
         Rs[i] = rot_diff * Rs[i];
         Vs[i] = rot_diff * Vs[i];
     }
-    ROS_DEBUG_STREAM("g0     " << g.transpose());
-    ROS_DEBUG_STREAM("my R0  " << Utility::R2ypr(Rs[0]).transpose()); 
+    // ROS_DEBUG_STREAM("g0     " << g.transpose());
+    // ROS_DEBUG_STREAM("my R0  " << Utility::R2ypr(Rs[0]).transpose()); 
 
     f_manager.clearDepth();
     f_manager.triangulate(frame_count, Ps, Rs, tic, ric);
@@ -819,6 +870,9 @@ void Estimator::vector2double()
 {
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
+        // cout << Ps[i].x() << " " << Ps[i].y() << " " << Ps[i].z() << endl;
+        // cout << "--------" << endl;
+
         para_Pose[i][0] = Ps[i].x();
         para_Pose[i][1] = Ps[i].y();
         para_Pose[i][2] = Ps[i].z();
@@ -1112,13 +1166,21 @@ void Estimator::optimization()
 
     ceres::Solver::Options options;
 
+    // This workspace is built against a CPU Ceres backend.
     options.linear_solver_type = ceres::DENSE_SCHUR;
+    if (USE_GPU_CERES)
+    {
+        ROS_WARN("use_gpu_ceres is enabled in config, but GPU Ceres is unavailable; falling back to CPU DENSE_SCHUR.");
+    }
+
     //options.num_threads = 2;
     options.trust_region_strategy_type = ceres::DOGLEG;
     options.max_num_iterations = NUM_ITERATIONS;
     //options.use_explicit_schur_complement = true;
     //options.minimizer_progress_to_stdout = true;
     //options.use_nonmonotonic_steps = true;
+
+
     if (marginalization_flag == MARGIN_OLD)
         options.max_solver_time_in_seconds = SOLVER_TIME * 4.0 / 5.0;
     else
@@ -1249,7 +1311,10 @@ void Estimator::optimization()
         vector<double *> parameter_blocks = marginalization_info->getParameterBlocks(addr_shift);
 
         if (last_marginalization_info)
+        {
             delete last_marginalization_info;
+            last_marginalization_info = nullptr;
+        }
         last_marginalization_info = marginalization_info;
         last_marginalization_parameter_blocks = parameter_blocks;
         
@@ -1267,7 +1332,7 @@ void Estimator::optimization()
                 vector<int> drop_set;
                 for (int i = 0; i < static_cast<int>(last_marginalization_parameter_blocks.size()); i++)
                 {
-                    ROS_ASSERT(last_marginalization_parameter_blocks[i] != para_SpeedBias[WINDOW_SIZE - 1]);
+                    assert(last_marginalization_parameter_blocks[i] != para_SpeedBias[WINDOW_SIZE - 1]);
                     if (last_marginalization_parameter_blocks[i] == para_Pose[WINDOW_SIZE - 1])
                         drop_set.push_back(i);
                 }
@@ -1316,7 +1381,10 @@ void Estimator::optimization()
             
             vector<double *> parameter_blocks = marginalization_info->getParameterBlocks(addr_shift);
             if (last_marginalization_info)
+            {
                 delete last_marginalization_info;
+                last_marginalization_info = nullptr;
+            }
             last_marginalization_info = marginalization_info;
             last_marginalization_parameter_blocks = parameter_blocks;
             
@@ -1365,6 +1433,7 @@ void Estimator::slideWindow()
                 Bgs[WINDOW_SIZE] = Bgs[WINDOW_SIZE - 1];
 
                 delete pre_integrations[WINDOW_SIZE];
+                pre_integrations[WINDOW_SIZE] = nullptr;
                 pre_integrations[WINDOW_SIZE] = new IntegrationBase{acc_0, gyr_0, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
 
                 dt_buf[WINDOW_SIZE].clear();
@@ -1377,6 +1446,7 @@ void Estimator::slideWindow()
                 map<double, ImageFrame>::iterator it_0;
                 it_0 = all_image_frame.find(t_0);
                 delete it_0->second.pre_integration;
+                it_0->second.pre_integration = nullptr;
                 all_image_frame.erase(all_image_frame.begin(), it_0);
             }
             slideWindowOld();
@@ -1410,6 +1480,7 @@ void Estimator::slideWindow()
                 Bgs[frame_count - 1] = Bgs[frame_count];
 
                 delete pre_integrations[WINDOW_SIZE];
+                pre_integrations[WINDOW_SIZE] = nullptr;
                 pre_integrations[WINDOW_SIZE] = new IntegrationBase{acc_0, gyr_0, Bas[WINDOW_SIZE], Bgs[WINDOW_SIZE]};
 
                 dt_buf[WINDOW_SIZE].clear();

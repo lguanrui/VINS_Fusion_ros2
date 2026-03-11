@@ -15,7 +15,18 @@ find_package(Boost REQUIRED COMPONENTS filesystem program_options system)
 include_directories(${Boost_INCLUDE_DIRS})
 
 find_package(OpenCV REQUIRED)
-find_package(Ceres REQUIRED)
+find_package(Ceres QUIET)
+if(NOT Ceres_FOUND)
+  set(VINS_FUSION_CERES_HINT "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ceres-install")
+  if(EXISTS "${VINS_FUSION_CERES_HINT}/lib/cmake/Ceres/CeresConfig.cmake")
+    list(PREPEND CMAKE_PREFIX_PATH "${VINS_FUSION_CERES_HINT}")
+    find_package(Ceres QUIET)
+  endif()
+endif()
+if(NOT Ceres_FOUND)
+  message(FATAL_ERROR
+    "Ceres was not found. Build the bundled Ceres with: ./scripts/build_ceres.sh")
+endif()
 include_directories(${CERES_INCLUDE_DIRS})
 
 

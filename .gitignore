@@ -19,3 +19,5 @@ install/
 log/
 .ros_logs/
 .local/
+third_party/ceres-build/
+third_party/ceres-install/

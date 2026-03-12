@@ -26,6 +26,8 @@ def generate_launch_description() -> LaunchDescription:
     use_rviz = LaunchConfiguration("use_rviz")
     use_loop_fusion = LaunchConfiguration("use_loop_fusion")
     play_bag = LaunchConfiguration("play_bag")
+    world_frame = LaunchConfiguration("world_frame")
+    world_tf_child_frame = LaunchConfiguration("world_tf_child_frame")
 
     vins_node = ExecuteProcess(
         cmd=["ros2", "run", "vins", "vins_node", config_file],
@@ -45,6 +47,14 @@ def generate_launch_description() -> LaunchDescription:
         arguments=["-d", rviz_config],
         output="screen",
         condition=IfCondition(use_rviz),
+    )
+
+    world_tf_node = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="world_tf_publisher",
+        arguments=["0", "0", "0", "0", "0", "0", world_frame, world_tf_child_frame],
+        output="screen",
     )
 
     bag_play = ExecuteProcess(
@@ -117,12 +127,23 @@ def generate_launch_description() -> LaunchDescription:
                 description="If true, launch RViz2 with the packaged config.",
             ),
             DeclareLaunchArgument(
+                "world_frame",
+                default_value="world",
+                description="Parent frame for the default static world TF.",
+            ),
+            DeclareLaunchArgument(
+                "world_tf_child_frame",
+                default_value="world_anchor",
+                description="Child frame used to materialize the world frame in TF.",
+            ),
+            DeclareLaunchArgument(
                 "log_dir",
                 default_value=default_log_dir,
                 description="Directory used for ROS 2 launch logs.",
             ),
             SetEnvironmentVariable("ROS_LOG_DIR", LaunchConfiguration("log_dir")),
             SetEnvironmentVariable("RCUTILS_LOGGING_BUFFERED_STREAM", "1"),
+            world_tf_node,
             vins_node,
             loop_fusion_node,
             rviz_node,

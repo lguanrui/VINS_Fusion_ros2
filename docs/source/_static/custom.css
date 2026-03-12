@@ -1,0 +1,18 @@
+/* Small Furo tweaks to keep the docs looking like a lab wiki, not a default theme dump. */
+
+:root {
+  --content-font-size: 16px;
+}
+
+.toctree-wrapper p.caption {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sidebar-brand-text {
+  font-weight: 700;
+}
+
+.content table.docutils {
+  width: 100%;
+}

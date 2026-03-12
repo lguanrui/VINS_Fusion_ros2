@@ -9,6 +9,10 @@
 
 #include "parameters.h"
 
+#include <cstdlib>
+
+#include <rcpputils/filesystem_helper.hpp>
+
 double INIT_DEPTH;
 double MIN_PARALLAX;
 double ACC_N, ACC_W;
@@ -49,6 +53,38 @@ int MIN_DIST;
 double F_THRESHOLD;
 int SHOW_TRACK;
 int FLOW_BACK;
+
+namespace {
+
+std::string expandUserPath(const std::string & path)
+{
+    if (path.empty() || path[0] != '~')
+        return path;
+
+    const char * home = std::getenv("HOME");
+    if (home == nullptr)
+        return path;
+
+    if (path.size() == 1)
+        return std::string(home);
+
+    if (path[1] == '/')
+        return std::string(home) + path.substr(1);
+
+    return path;
+}
+
+void ensureDirectoryExists(const std::string & path)
+{
+    if (path.empty())
+        return;
+
+    rcpputils::fs::path fs_path(path);
+    if (!rcpputils::fs::exists(fs_path))
+        rcpputils::fs::create_directories(fs_path);
+}
+
+}  // namespace
 
 
 template <typename T>
@@ -117,6 +153,8 @@ void readParameters(std::string config_file)
     MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;
 
     fsSettings["output_path"] >> OUTPUT_FOLDER;
+    OUTPUT_FOLDER = expandUserPath(OUTPUT_FOLDER);
+    ensureDirectoryExists(OUTPUT_FOLDER);
     VINS_RESULT_PATH = OUTPUT_FOLDER + "/vio.csv";
     std::cout << "result path " << VINS_RESULT_PATH << std::endl;
     std::ofstream fout(VINS_RESULT_PATH, std::ios::out);

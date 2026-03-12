@@ -26,9 +26,11 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <cstdlib>
 #include <eigen3/Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/eigen.hpp>
+#include <rcpputils/filesystem_helper.hpp>
 #include "keyframe.h"
 #include "utility/tic_toc.h"
 #include "pose_graph.h"
@@ -76,6 +78,38 @@ Eigen::Vector3d last_t(-100, -100, -100);
 double last_image_time = -1;
 
 rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_point_cloud, pub_margin_cloud;
+
+namespace {
+
+std::string expandUserPath(const std::string & path)
+{
+    if (path.empty() || path[0] != '~')
+        return path;
+
+    const char * home = std::getenv("HOME");
+    if (home == nullptr)
+        return path;
+
+    if (path.size() == 1)
+        return std::string(home);
+
+    if (path[1] == '/')
+        return std::string(home) + path.substr(1);
+
+    return path;
+}
+
+void ensureDirectoryExists(const std::string & path)
+{
+    if (path.empty())
+        return;
+
+    rcpputils::fs::path fs_path(path);
+    if (!rcpputils::fs::exists(fs_path))
+        rcpputils::fs::create_directories(fs_path);
+}
+
+}  // namespace
 
 void new_sequence()
 {
@@ -466,6 +500,10 @@ int main(int argc, char **argv)
     fsSettings["image0_topic"] >> IMAGE_TOPIC;        
     fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;
     fsSettings["output_path"] >> VINS_RESULT_PATH;
+    POSE_GRAPH_SAVE_PATH = expandUserPath(POSE_GRAPH_SAVE_PATH);
+    VINS_RESULT_PATH = expandUserPath(VINS_RESULT_PATH);
+    ensureDirectoryExists(POSE_GRAPH_SAVE_PATH);
+    ensureDirectoryExists(VINS_RESULT_PATH);
     fsSettings["save_image"] >> DEBUG_IMAGE;
 
     LOAD_PREVIOUS_POSE_GRAPH = fsSettings["load_previous_pose_graph"];

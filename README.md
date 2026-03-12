@@ -58,45 +58,56 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
-## 5. Run Examples
+## 5. One-Line EuRoC Demo
 
-### 5.1 EuRoC (stereo + IMU)
-
-Terminal 1 (RViz2):
+If your converted EuRoC bag is available under the standard workspace layout, the fastest path is:
 
 ```bash
-source ~/vins_fusion_ws/install/setup.bash
-ros2 launch vins vins_rviz.launch.xml
+cd ~/vins_fusion_ws
+./src/vins_fusion/scripts/run_euroc_demo.sh
 ```
 
-Terminal 2 (VINS estimator):
+To launch the same stack directly with ROS2:
 
 ```bash
-source ~/vins_fusion_ws/install/setup.bash
-ros2 run vins vins_node ~/vins_fusion_ws/src/vins_fusion/config/euroc/euroc_stereo_imu_config.yaml
+cd ~/vins_fusion_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch vins euroc_stereo_imu_demo.launch.py \
+  bag_path:=~/vins_fusion_ws/dataset_ros2/machine_hall/MH_01_easy/MH_01_easy \
+  play_bag:=true
 ```
 
-Terminal 3 (optional loop closure):
+This launch file starts:
+
+- `vins_node`
+- `loop_fusion_node`
+- `rviz2`
+- `ros2 bag play`
+
+For pane-based debugging with `tmux`:
 
 ```bash
-source ~/vins_fusion_ws/install/setup.bash
-ros2 run loop_fusion loop_fusion_node ~/vins_fusion_ws/src/vins_fusion/config/euroc/euroc_stereo_imu_config.yaml
+cd ~/vins_fusion_ws
+./src/vins_fusion/scripts/run_euroc_tmux.sh
 ```
 
-Terminal 4 (bag playback):
+Useful options:
 
-```bash
-ros2 bag play <PATH_TO_ROS2_BAG>
-```
+- `./src/vins_fusion/scripts/run_euroc_demo.sh --bag /absolute/path/to/ros2_bag`
+- `./src/vins_fusion/scripts/run_euroc_demo.sh --no-loop`
+- `./src/vins_fusion/scripts/run_euroc_tmux.sh --session vins-euroc-mh03 --bag /absolute/path/to/ros2_bag`
 
-### 5.2 KITTI Odometry
+## 6. Other Dataset Entry Points
+
+### 6.1 KITTI Odometry
 
 ```bash
 source ~/vins_fusion_ws/install/setup.bash
 ros2 run vins kitti_odom_test ~/vins_fusion_ws/src/vins_fusion/config/kitti_odom/kitti_config00-02.yaml <KITTI_SEQUENCE_PATH>
 ```
 
-### 5.3 KITTI GPS Fusion
+### 6.2 KITTI GPS Fusion
 
 ```bash
 source ~/vins_fusion_ws/install/setup.bash
@@ -104,7 +115,30 @@ ros2 run vins kitti_gps_test ~/vins_fusion_ws/src/vins_fusion/config/kitti_raw/k
 ros2 run global_fusion global_fusion_node
 ```
 
-## 6. Troubleshooting
+## 7. Documentation Site
+
+The repository includes a Sphinx site styled with Furo:
+
+```bash
+cd ~/vins_fusion_ws/src/vins_fusion
+/usr/bin/python3 -m pip install --user -r docs/requirements.txt
+./scripts/build_docs.sh
+```
+
+The built HTML is written to:
+
+`~/vins_fusion_ws/src/vins_fusion/docs/build/html`
+
+Main docs entry points:
+
+- `docs/source/index.rst`
+- `docs/source/quickstart.rst`
+- `docs/source/euroc_demo.rst`
+- `docs/source/architecture.rst`
+- `docs/source/codebase.rst`
+- `docs/source/evaluation.rst`
+
+## 8. Troubleshooting
 
 - `CeresConfig.cmake not found`:
   1. `cd ~/vins_fusion_ws/src/vins_fusion`
@@ -118,7 +152,7 @@ ros2 run global_fusion global_fusion_node
   1. ensure ROS uses system Python (`export PATH=/usr/bin:/bin:$PATH`)
   2. install package parser: `sudo apt install -y python3-catkin-pkg`
 
-## 7. Acknowledgements
+## 9. Acknowledgements
 
 The original VINS-Fusion was developed by Tong Qin, Shaozu Cao, Jie Pan, Peiliang Li, and Shaojie Shen (HKUST Aerial Robotics Group).
 
@@ -129,6 +163,6 @@ Core upstream projects used by VINS-Fusion include:
 - CamOdoCal camera models
 - GeographicLib
 
-## 8. License
+## 10. License
 
 GPLv3. See [LICENCE](./LICENCE).

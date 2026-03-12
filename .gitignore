@@ -19,5 +19,7 @@ install/
 log/
 .ros_logs/
 .local/
+docs/build/
 third_party/ceres-build/
 third_party/ceres-install/
+__pycache__/

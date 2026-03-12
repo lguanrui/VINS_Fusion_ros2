@@ -88,9 +88,19 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../config
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../support_files
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install nodes
 install(
-  TARGETS vins_node
+  TARGETS vins_node kitti_odom_test kitti_gps_test
   DESTINATION lib/${PROJECT_NAME}
 )
 

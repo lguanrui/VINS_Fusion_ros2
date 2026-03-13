@@ -11,6 +11,20 @@ VINS-Fusion here is still the original optimization-based design, but split into
 * ``global_fusion``: optional GPS fusion for datasets that provide it
 * ``camera_models``: camera model and calibration support
 
+Composition model
+-----------------
+
+The ROS2 port now exposes each major runtime as a composable node:
+
+* ``vins::VinsEstimatorComponent``
+* ``loop_fusion::LoopFusionComponent``
+* ``global_fusion::GlobalFusionComponent``
+
+This is the ROS2 analogue of ROS1 nodelets. The EuRoC launch file loads the
+estimator and loop-fusion components into one ``component_container_mt`` process
+with intra-process communication enabled, which reduces message-copy overhead
+for the highest-rate topics.
+
 Estimator state
 ---------------
 
@@ -48,6 +62,13 @@ This split is useful operationally:
 * VIO can run alone for local state estimation.
 * Loop closure can be enabled only when long-run drift matters.
 * Global fusion stays optional and isolated from the core estimator.
+
+Operational note
+----------------
+
+The standalone executables are still present as thin wrappers around the same
+runner classes, so ``ros2 run`` workflows continue to work. The composable-node
+path is the preferred integration path for performance-sensitive ROS2 runs.
 
 Important implementation detail
 -------------------------------

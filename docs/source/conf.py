@@ -8,6 +8,7 @@ release = "ROS2 Humble"
 extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx.ext.githubpages",
+    "sphinx.ext.mathjax",
 ]
 
 templates_path = ["_templates"]

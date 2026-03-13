@@ -34,8 +34,9 @@ If the converted EuRoC bag exists at the default location
 
 That wrapper launches:
 
-* ``vins_node``
-* ``loop_fusion_node``
+* the ``vins_fusion_container`` composable-node host
+* ``vins::VinsEstimatorComponent``
+* ``loop_fusion::LoopFusionComponent``
 * ``rviz2``
 * ``ros2 bag play`` on the selected bag
 
@@ -57,6 +58,24 @@ Useful launch arguments
 * ``use_loop_fusion``: disable loop closure for baseline VIO runs.
 * ``use_rviz``: useful for headless runs or logging-only sessions.
 * ``bag_rate``: slow down playback when debugging initialization.
+* ``record_results``: record estimator outputs into a ros2 bag.
+* ``record_bag_path``: choose where the recorded result bag is written.
+* ``world_frame`` / ``world_tf_child_frame``: control the default static TF used by RViz2.
+
+Composable-node benchmark
+-------------------------
+
+For a full EuRoC run that records estimator outputs and evaluates them against
+the dataset ground truth:
+
+.. code-block:: bash
+
+   ./src/vins_fusion/scripts/run_euroc_component_benchmark.sh \
+     --out-dir ./test_results/euroc_component_benchmark_MH01
+
+This script launches the same composable EuRoC stack without RViz2, records the
+result topics into a ROS2 bag, and writes metrics plus plots for both the VIO
+and loop-fusion trajectories.
 
 tmux workflow
 -------------

@@ -27,6 +27,16 @@ Loop fusion starts but cannot find the vocabulary
 Bag plays but estimator stays idle
   Check that the config file topic names match the bag. For EuRoC stereo+IMU they should be ``/imu0``, ``/cam0/image_raw``, and ``/cam1/image_raw``.
 
+``RTPS_TRANSPORT_SHM Error`` with ``open_and_lock_file failed``
+  Fast DDS failed to initialize its shared-memory transport. The most common causes are stale files in ``/dev/shm`` from an older ROS2 run, permission mismatches from mixing ``sudo`` and non-``sudo`` launches, or a restricted shared-memory environment. The system often continues by falling back to another transport, but if startup is unstable:
+
+  * stop all ROS2 processes
+  * remove stale Fast DDS shared-memory files
+  * relaunch everything as the same user
+
+Composable container needs ``SIGKILL`` on shutdown
+  The current benchmark run completes, records the result bag, and writes metrics, but the component container can still hang during teardown and be force-killed by launch. This is a known shutdown issue in the current composition path rather than a data-quality failure.
+
 Documentation build
 -------------------
 
@@ -43,3 +53,18 @@ Then build:
    ./scripts/build_docs.sh
 
 The generated HTML is written to ``docs/build/html``.
+
+To check the site locally:
+
+.. code-block:: bash
+
+   xdg-open docs/build/html/index.html
+
+Or serve it over HTTP:
+
+.. code-block:: bash
+
+   cd docs/build/html
+   /usr/bin/python3 -m http.server 8000
+
+Then open ``http://127.0.0.1:8000`` in a browser.

@@ -17,6 +17,27 @@ It then:
 * saves a 3D trajectory comparison plot
 * writes ``metrics.json``
 
+Recorded-bag benchmark
+----------------------
+
+The composable EuRoC workflow adds a second evaluation path:
+``scripts/analyze_recorded_estimation_bag.py`` reads estimator trajectories
+directly from a recorded ROS2 bag and compares them with the ground truth in the
+original dataset bag.
+
+For a one-command run, use:
+
+.. code-block:: bash
+
+   ./src/vins_fusion/scripts/run_euroc_component_benchmark.sh \
+     --out-dir ./test_results/euroc_component_benchmark_MH01
+
+This produces:
+
+* ``results_bag/`` with the recorded estimator outputs
+* ``vins_estimator/metrics.json`` and plots
+* ``loop_fusion/metrics.json`` and plots when loop fusion is enabled
+
 Example
 -------
 
@@ -63,3 +84,7 @@ Important caveat for this repository
 ------------------------------------
 
 The current VINS CSV writer stores timestamps with integer-second precision. The evaluation script reconstructs sub-second ordering heuristically so short-run plots and APE/RPE remain usable, but this is still weaker than logging full ROS timestamps directly.
+
+Another EuRoC-specific caveat is that the converted ``MH_01_easy`` ROS2 bag in
+this workspace exposes only ``/leica/position`` as ground truth. That means the
+benchmark currently reports translation metrics only for that sequence.

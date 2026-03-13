@@ -3,6 +3,7 @@ project(camera_models)
 
 
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_options(-Wextra -Wpedantic)
 
 
@@ -74,6 +75,7 @@ add_library(camera_models
     src/sparse_graph/Transform.cc
     src/gpl/gpl.cc
     src/gpl/EigenQuaternionParameterization.cc)
+set_target_properties(camera_models PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(Calibrations ${Boost_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})
 target_link_libraries(camera_models ${Boost_LIBRARIES} ${OpenCV_LIBS} ${CERES_LIBRARIES})

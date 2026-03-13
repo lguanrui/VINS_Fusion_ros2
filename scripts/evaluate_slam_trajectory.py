@@ -48,8 +48,23 @@ _deprioritize_user_site()
 
 import matplotlib
 import numpy as np
-from rosbags.highlevel import AnyReader
 from scipy.spatial.transform import Rotation, Slerp
+
+try:
+    from rosbags.highlevel import AnyReader
+except ImportError:
+    AnyReader = None
+
+try:
+    from rclpy.serialization import deserialize_message
+    from rosbag2_py import ConverterOptions, SequentialReader, StorageOptions
+    from rosidl_runtime_py.utilities import get_message
+except ImportError:
+    ConverterOptions = None
+    SequentialReader = None
+    StorageOptions = None
+    deserialize_message = None
+    get_message = None
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -61,6 +76,12 @@ class Trajectory:
     p: np.ndarray  # position xyz, shape (N, 3)
     q_wxyz: Optional[np.ndarray] = None  # optional quaternion, shape (N, 4)
     topic: str = ""
+
+
+@dataclass
+class BagConnection:
+    topic: str
+    msgtype: str
 
 
 SUPPORTED_GT_TYPES = {
@@ -205,18 +226,60 @@ def _pick_gt_connection(connections: Sequence[object], gt_topic: str) -> object:
     raise ValueError("No supported ground-truth topic found in bag.")
 
 
+def list_bag_connections(bag_path: Path) -> Sequence[BagConnection]:
+    if not bag_path.exists():
+        raise FileNotFoundError(f"Bag path does not exist: {bag_path}")
+
+    if bag_path.is_dir() and SequentialReader is not None:
+        reader = SequentialReader()
+        reader.open(
+            StorageOptions(uri=str(bag_path), storage_id="sqlite3"),
+            ConverterOptions(
+                input_serialization_format="cdr",
+                output_serialization_format="cdr",
+            ),
+        )
+        return [
+            BagConnection(topic=topic.name, msgtype=topic.type)
+            for topic in reader.get_all_topics_and_types()
+        ]
+
+    if AnyReader is not None:
+        with AnyReader([bag_path]) as reader:
+            return [BagConnection(topic=conn.topic, msgtype=conn.msgtype) for conn in reader.connections]
+
+    raise ImportError(
+        "No supported rosbag reader is available. Install 'rosbags' or source a ROS 2 "
+        "environment with rosbag2_py."
+    )
+
+
 def load_groundtruth_from_bag(bag_path: Path, gt_topic: str) -> Trajectory:
     if not bag_path.exists():
         raise FileNotFoundError(f"Bag path does not exist: {bag_path}")
 
-    with AnyReader([bag_path]) as reader:
-        conn = _pick_gt_connection(reader.connections, gt_topic)
-        t_vals = []
-        p_vals = []
-        q_vals = []
+    t_vals = []
+    p_vals = []
+    q_vals = []
 
-        for _, timestamp_ns, rawdata in reader.messages(connections=[conn]):
-            msg = reader.deserialize(rawdata, conn.msgtype)
+    if bag_path.is_dir() and SequentialReader is not None:
+        connections = list_bag_connections(bag_path)
+        conn = _pick_gt_connection(connections, gt_topic)
+        reader = SequentialReader()
+        reader.open(
+            StorageOptions(uri=str(bag_path), storage_id="sqlite3"),
+            ConverterOptions(
+                input_serialization_format="cdr",
+                output_serialization_format="cdr",
+            ),
+        )
+        msg_cls = get_message(conn.msgtype)
+
+        while reader.has_next():
+            topic, rawdata, timestamp_ns = reader.read_next()
+            if topic != conn.topic:
+                continue
+            msg = deserialize_message(rawdata, msg_cls)
             ts = _header_stamp_to_sec(msg)
             if ts is None:
                 ts = float(timestamp_ns) * 1e-9
@@ -225,6 +288,25 @@ def load_groundtruth_from_bag(bag_path: Path, gt_topic: str) -> Trajectory:
             p_vals.append(p)
             if q is not None:
                 q_vals.append(q)
+    elif AnyReader is not None:
+        with AnyReader([bag_path]) as reader:
+            conn = _pick_gt_connection(reader.connections, gt_topic)
+
+            for _, timestamp_ns, rawdata in reader.messages(connections=[conn]):
+                msg = reader.deserialize(rawdata, conn.msgtype)
+                ts = _header_stamp_to_sec(msg)
+                if ts is None:
+                    ts = float(timestamp_ns) * 1e-9
+                p, q = _extract_pose_and_quat(msg, conn.msgtype)
+                t_vals.append(ts)
+                p_vals.append(p)
+                if q is not None:
+                    q_vals.append(q)
+    else:
+        raise ImportError(
+            "No supported rosbag reader is available. Install 'rosbags' or source a ROS 2 "
+            "environment with rosbag2_py."
+        )
 
     if not t_vals:
         raise ValueError(f"No ground-truth messages on topic '{conn.topic}'.")

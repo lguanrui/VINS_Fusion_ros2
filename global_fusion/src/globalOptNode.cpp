@@ -10,6 +10,8 @@
  *******************************************************/
 
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <rclcpp_components/register_node_macro.hpp>
 #include "globalOpt.h"
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -24,6 +26,7 @@
 #include <queue>
 #include <mutex>
 #include <functional>
+#include "runner.hpp"
 
 GlobalOptimization globalEstimator;
 rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_global_odometry;
@@ -170,28 +173,73 @@ void GPS_callback(const sensor_msgs::msg::NavSatFix::SharedPtr GPS_msg)
 
 
 
-int main(int argc, char **argv)
+namespace
 {
-    rclcpp::init(argc, argv);
-    auto n = rclcpp::Node::make_shared("globalEstimator");
-    auto qos_profile = rclcpp::QoS(rclcpp::KeepLast(100));
+	rclcpp::NodeOptions make_host_options(const rclcpp::NodeOptions & options)
+	{
+		auto host_options = options;
+		host_options.arguments({});
+		return host_options;
+	}
 
+	rclcpp::NodeOptions make_worker_options(const rclcpp::NodeOptions & options)
+	{
+		auto worker_options = options;
+		worker_options.use_intra_process_comms(true);
+		return worker_options;
+	}
 
-    auto sub_GPS = n->create_subscription<sensor_msgs::msg::NavSatFix>("/gps", rclcpp::QoS(rclcpp::KeepLast(100)), GPS_callback);
+	rclcpp::ExecutorOptions make_executor_options(const rclcpp::NodeOptions & options)
+	{
+		rclcpp::ExecutorOptions executor_options;
+		executor_options.context = options.context();
+		return executor_options;
+	}
+}  // namespace
 
-    auto sub_vio = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/odometry", rclcpp::QoS(rclcpp::KeepLast(100)), vio_callback);
+namespace global_fusion
+{
 
+GlobalFusionRunner::GlobalFusionRunner(const rclcpp::NodeOptions & options)
+{
+	node_ = rclcpp::Node::make_shared("globalEstimator", options);
+	sub_gps_ = node_->create_subscription<sensor_msgs::msg::NavSatFix>(
+		"/gps", rclcpp::QoS(rclcpp::KeepLast(100)), GPS_callback);
+	sub_vio_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+		"/vins_estimator/odometry", rclcpp::QoS(rclcpp::KeepLast(100)), vio_callback);
 
-
-
-
-    pub_global_path = n->create_publisher<nav_msgs::msg::Path>("global_path", 100);
-    pub_global_odometry = n->create_publisher<nav_msgs::msg::Odometry>("global_odometry", 100);
-    pub_car = n->create_publisher<visualization_msgs::msg::MarkerArray>("car_model", 1000);
-
-
-    global_path = &(globalEstimator.global_path);
-    rclcpp::spin(n);
-    return 0;
+	pub_global_path = node_->create_publisher<nav_msgs::msg::Path>("global_path", 100);
+	pub_global_odometry = node_->create_publisher<nav_msgs::msg::Odometry>("global_odometry", 100);
+	pub_car = node_->create_publisher<visualization_msgs::msg::MarkerArray>("car_model", 1000);
+	global_path = &(globalEstimator.global_path);
 }
 
+class GlobalFusionComponent : public rclcpp::Node
+{
+public:
+	explicit GlobalFusionComponent(const rclcpp::NodeOptions & options)
+		: rclcpp::Node("global_fusion_component_host", make_host_options(options)),
+		  runner_(std::make_unique<GlobalFusionRunner>(make_worker_options(options))),
+		  executor_(make_executor_options(options))
+	{
+		executor_.add_node(runner_->node());
+		spin_thread_ = std::thread([this]() { executor_.spin(); });
+	}
+
+	~GlobalFusionComponent() override
+	{
+		executor_.cancel();
+		if (spin_thread_.joinable())
+			spin_thread_.join();
+		runner_.reset();
+	}
+
+private:
+	std::unique_ptr<GlobalFusionRunner> runner_;
+	rclcpp::executors::SingleThreadedExecutor executor_;
+	std::thread spin_thread_;
+};
+
+}  // namespace global_fusion
+
+RCLCPP_COMPONENTS_REGISTER_NODE(global_fusion::GlobalFusionComponent)

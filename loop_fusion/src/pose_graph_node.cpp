@@ -10,7 +10,11 @@
  *******************************************************/
 
 #include <vector>
+#include <atomic>
+#include <stdexcept>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <rclcpp_components/register_node_macro.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <sensor_msgs/msg/point_cloud.hpp>
@@ -37,6 +41,7 @@
 #include "utility/CameraPoseVisualization.h"
 // #include "camodocal/camera_models/CameraFactory.h"
 #include "parameters.h"
+#include "runner.hpp"
 #define SKIP_FIRST_CNT 10
 using namespace std;
 
@@ -76,6 +81,7 @@ std::string VINS_RESULT_PATH;
 CameraPoseVisualization cameraposevisual(1, 0, 0, 1);
 Eigen::Vector3d last_t(-100, -100, -100);
 double last_image_time = -1;
+std::atomic<bool> loop_fusion_running{false};
 
 rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_point_cloud, pub_margin_cloud;
 
@@ -283,7 +289,7 @@ void extrinsic_callback(const nav_msgs::msg::Odometry::SharedPtr pose_msg)
 
 void process()
 {
-    while (true)
+    while (loop_fusion_running.load() && rclcpp::ok())
     {
         sensor_msgs::msg::Image::ConstPtr image_msg = NULL;
         sensor_msgs::msg::PointCloud::ConstPtr point_msg = NULL;
@@ -422,7 +428,7 @@ void process()
 
 void command()
 {
-    while(1)
+    while(loop_fusion_running.load() && rclcpp::ok())
     {
         char c = getchar();
         if (c == 's')
@@ -442,32 +448,80 @@ void command()
     }
 }
 
-int main(int argc, char **argv)
+namespace
 {
-    rclcpp::init(argc, argv);
-    auto n = rclcpp::Node::make_shared("loop_fusion");
-    posegraph.registerPub(n);
-    
+void clear_loop_fusion_buffers()
+{
+    std::lock_guard<std::mutex> lock(m_buf);
+    while (!image_buf.empty())
+        image_buf.pop();
+    while (!point_buf.empty())
+        point_buf.pop();
+    while (!pose_buf.empty())
+        pose_buf.pop();
+    while (!odometry_buf.empty())
+        odometry_buf.pop();
+}
+
+rclcpp::NodeOptions make_host_options(const rclcpp::NodeOptions & options)
+{
+    auto host_options = options;
+    host_options.arguments({});
+    return host_options;
+}
+
+rclcpp::NodeOptions make_worker_options(const rclcpp::NodeOptions & options)
+{
+    auto worker_options = options;
+    worker_options.use_intra_process_comms(true);
+    return worker_options;
+}
+
+rclcpp::ExecutorOptions make_executor_options(const rclcpp::NodeOptions & options)
+{
+    rclcpp::ExecutorOptions executor_options;
+    executor_options.context = options.context();
+    return executor_options;
+}
+
+}  // namespace
+
+namespace loop_fusion
+{
+
+LoopFusionRunner::LoopFusionRunner(const rclcpp::NodeOptions & options)
+{
+    clear_loop_fusion_buffers();
+    loop_fusion_running.store(false);
+    node_ = rclcpp::Node::make_shared("loop_fusion", options);
+    posegraph.registerPub(node_);
+
     VISUALIZATION_SHIFT_X = 0;
     VISUALIZATION_SHIFT_Y = 0;
     SKIP_CNT = 0;
     SKIP_DIS = 0;
+    frame_index = 0;
+    sequence = 1;
+    skip_first_cnt = 0;
+    skip_cnt = 0;
+    load_flag = 0;
+    start_flag = 0;
+    last_image_time = -1;
+    last_t = Eigen::Vector3d(-100, -100, -100);
 
-    if(argc != 2)
+    const auto config_file = node_->declare_parameter<std::string>("config_file", "");
+    enable_keyboard_commands_ = node_->declare_parameter<bool>("enable_keyboard_commands", false);
+    if (config_file.empty())
     {
-        printf("please intput: rosrun loop_fusion loop_fusion_node [config file] \n"
-               "for example: rosrun loop_fusion loop_fusion_node "
-               "/home/tony-ws1/catkin_ws/src/VINS-Fusion/config/euroc/euroc_stereo_imu_config.yaml \n");
-        return 0;
+        throw std::invalid_argument("Parameter 'config_file' is required for loop_fusion.");
     }
-    
-    string config_file = argv[1];
-    printf("config_file: %s\n", argv[1]);
+
+    printf("config_file: %s\n", config_file.c_str());
 
     cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
-    if(!fsSettings.isOpened())
+    if (!fsSettings.isOpened())
     {
-        std::cerr << "ERROR: Wrong path to settings" << std::endl;
+        throw std::runtime_error("Wrong path to settings: " + config_file);
     }
 
     cameraposevisual.setScale(0.1);
@@ -497,7 +551,7 @@ int main(int argc, char **argv)
     printf("cam calib path: %s\n", cam0Path.c_str());
     m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(cam0Path.c_str());
 
-    fsSettings["image0_topic"] >> IMAGE_TOPIC;        
+    fsSettings["image0_topic"] >> IMAGE_TOPIC;
     fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;
     fsSettings["output_path"] >> VINS_RESULT_PATH;
     POSE_GRAPH_SAVE_PATH = expandUserPath(POSE_GRAPH_SAVE_PATH);
@@ -530,27 +584,66 @@ int main(int argc, char **argv)
         load_flag = 1;
     }
 
-    auto sub_vio          = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/odometry", rclcpp::QoS(rclcpp::KeepLast(2000)), vio_callback);
-    auto sub_image        = n->create_subscription<sensor_msgs::msg::Image>(IMAGE_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)), image_callback);
-    auto sub_pose         = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/keyframe_pose", rclcpp::QoS(rclcpp::KeepLast(2000)), pose_callback);
-    auto sub_extrinsic    = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/extrinsic", rclcpp::QoS(rclcpp::KeepLast(2000)), extrinsic_callback);
-    auto sub_point        = n->create_subscription<sensor_msgs::msg::PointCloud>("/vins_estimator/keyframe_point", rclcpp::QoS(rclcpp::KeepLast(2000)), point_callback);
-    auto sub_margin_point = n->create_subscription<sensor_msgs::msg::PointCloud>("/vins_estimator/margin_cloud", rclcpp::QoS(rclcpp::KeepLast(2000)), margin_point_callback);
+    sub_vio_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+        "/vins_estimator/odometry", rclcpp::QoS(rclcpp::KeepLast(2000)), vio_callback);
+    sub_image_ = node_->create_subscription<sensor_msgs::msg::Image>(
+        IMAGE_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)), image_callback);
+    sub_pose_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+        "/vins_estimator/keyframe_pose", rclcpp::QoS(rclcpp::KeepLast(2000)), pose_callback);
+    sub_extrinsic_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+        "/vins_estimator/extrinsic", rclcpp::QoS(rclcpp::KeepLast(2000)), extrinsic_callback);
+    sub_point_ = node_->create_subscription<sensor_msgs::msg::PointCloud>(
+        "/vins_estimator/keyframe_point", rclcpp::QoS(rclcpp::KeepLast(2000)), point_callback);
+    sub_margin_point_ = node_->create_subscription<sensor_msgs::msg::PointCloud>(
+        "/vins_estimator/margin_cloud", rclcpp::QoS(rclcpp::KeepLast(2000)), margin_point_callback);
 
+    pub_match_img = node_->create_publisher<sensor_msgs::msg::Image>("match_image", 1000);
+    pub_camera_pose_visual = node_->create_publisher<visualization_msgs::msg::MarkerArray>("camera_pose_visual", 1000);
+    pub_point_cloud = node_->create_publisher<sensor_msgs::msg::PointCloud>("point_cloud_loop_rect", 1000);
+    pub_margin_cloud = node_->create_publisher<sensor_msgs::msg::PointCloud>("margin_cloud_loop_rect", 1000);
+    pub_odometry_rect = node_->create_publisher<nav_msgs::msg::Odometry>("odometry_rect", 1000);
 
-    pub_match_img          = n->create_publisher<sensor_msgs::msg::Image>("match_image", 1000);
-    pub_camera_pose_visual = n->create_publisher<visualization_msgs::msg::MarkerArray>("camera_pose_visual", 1000);
-    pub_point_cloud        = n->create_publisher<sensor_msgs::msg::PointCloud>("point_cloud_loop_rect", 1000);
-    pub_margin_cloud       = n->create_publisher<sensor_msgs::msg::PointCloud>("margin_cloud_loop_rect", 1000);
-    pub_odometry_rect      = n->create_publisher<nav_msgs::msg::Odometry>("odometry_rect", 1000);
-
-    std::thread measurement_process;
-    std::thread keyboard_command_process;
-
-    measurement_process = std::thread(process);
-    keyboard_command_process = std::thread(command);
-    
-    rclcpp::spin(n);
-
-    return 0;
+    loop_fusion_running.store(true);
+    measurement_thread_ = std::thread(process);
+    if (enable_keyboard_commands_)
+        keyboard_thread_ = std::thread(command);
 }
+
+LoopFusionRunner::~LoopFusionRunner()
+{
+    loop_fusion_running.store(false);
+    if (measurement_thread_.joinable())
+        measurement_thread_.join();
+    if (keyboard_thread_.joinable())
+        keyboard_thread_.detach();
+}
+
+class LoopFusionComponent : public rclcpp::Node
+{
+public:
+    explicit LoopFusionComponent(const rclcpp::NodeOptions & options)
+        : rclcpp::Node("loop_fusion_component_host", make_host_options(options)),
+          runner_(std::make_unique<LoopFusionRunner>(make_worker_options(options))),
+          executor_(make_executor_options(options))
+    {
+        executor_.add_node(runner_->node());
+        spin_thread_ = std::thread([this]() { executor_.spin(); });
+    }
+
+    ~LoopFusionComponent() override
+    {
+        executor_.cancel();
+        if (spin_thread_.joinable())
+            spin_thread_.join();
+        runner_.reset();
+    }
+
+private:
+    std::unique_ptr<LoopFusionRunner> runner_;
+    rclcpp::executors::SingleThreadedExecutor executor_;
+    std::thread spin_thread_;
+};
+
+}  // namespace loop_fusion
+
+RCLCPP_COMPONENTS_REGISTER_NODE(loop_fusion::LoopFusionComponent)

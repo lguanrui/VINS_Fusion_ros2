@@ -10,15 +10,20 @@
  *******************************************************/
 
 #include <stdio.h>
+#include <atomic>
 #include <queue>
 #include <map>
 #include <thread>
 #include <mutex>
+#include <stdexcept>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
+#include <rclcpp_components/register_node_macro.hpp>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include "estimator/estimator.h"
 #include "estimator/parameters.h"
+#include "runners.hpp"
 #include "utility/visualization.h"
 
 Estimator estimator;
@@ -28,6 +33,7 @@ queue<sensor_msgs::msg::PointCloud::ConstPtr> feature_buf;
 queue<sensor_msgs::msg::Image::ConstPtr> img0_buf;
 queue<sensor_msgs::msg::Image::ConstPtr> img1_buf;
 std::mutex m_buf;
+std::atomic<bool> vins_estimator_running{false};
 
 // header: 1403715278
 void img0_callback(const sensor_msgs::msg::Image::SharedPtr img_msg)
@@ -73,7 +79,7 @@ cv::Mat getImageFromMsg(const sensor_msgs::msg::Image::ConstPtr &img_msg)
 // extract images with same timestamp from two topics
 void sync_process()
 {
-    while(1)
+    while(vins_estimator_running.load() && rclcpp::ok())
     {
         if(STEREO)
         {
@@ -237,23 +243,61 @@ void cam_switch_callback(const std_msgs::msg::Bool::SharedPtr switch_msg)
     return;
 }
 
-int main(int argc, char **argv)
+namespace
 {
-    rclcpp::init(argc, argv);
-	auto n = rclcpp::Node::make_shared("vins_estimator");
-    // ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
 
-    if(argc != 2)
+void clear_vins_estimator_buffers()
+{
+    std::lock_guard<std::mutex> lock(m_buf);
+    while (!imu_buf.empty())
+        imu_buf.pop();
+    while (!feature_buf.empty())
+        feature_buf.pop();
+    while (!img0_buf.empty())
+        img0_buf.pop();
+    while (!img1_buf.empty())
+        img1_buf.pop();
+}
+
+rclcpp::NodeOptions make_host_options(const rclcpp::NodeOptions & options)
+{
+    auto host_options = options;
+    host_options.arguments({});
+    return host_options;
+}
+
+rclcpp::NodeOptions make_worker_options(const rclcpp::NodeOptions & options)
+{
+    auto worker_options = options;
+    worker_options.use_intra_process_comms(true);
+    return worker_options;
+}
+
+rclcpp::ExecutorOptions make_executor_options(const rclcpp::NodeOptions & options)
+{
+    rclcpp::ExecutorOptions executor_options;
+    executor_options.context = options.context();
+    return executor_options;
+}
+
+}  // namespace
+
+namespace vins
+{
+
+VinsEstimatorRunner::VinsEstimatorRunner(const rclcpp::NodeOptions & options)
+{
+    clear_vins_estimator_buffers();
+    estimator.clearState();
+
+    node_ = rclcpp::Node::make_shared("vins_estimator", options);
+    const auto config_file = node_->declare_parameter<std::string>("config_file", "");
+    if (config_file.empty())
     {
-        printf("please intput: rosrun vins vins_node [config file] \n"
-               "for example: rosrun vins vins_node "
-               "~/catkin_ws/src/VINS-Fusion/config/euroc/euroc_stereo_imu_config.yaml \n");
-        return 1;
+        throw std::invalid_argument("Parameter 'config_file' is required for vins_estimator.");
     }
 
-    string config_file = argv[1];
-    printf("config_file: %s\n", argv[1]);
-
+    printf("config_file: %s\n", config_file.c_str());
     readParameters(config_file);
     estimator.setParameter();
 
@@ -263,29 +307,68 @@ int main(int argc, char **argv)
 
     ROS_WARN("waiting for image and imu...");
 
-    registerPub(n);
+    registerPub(node_);
 
-
-    rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu = NULL;
-    if(USE_IMU)
+    if (USE_IMU)
     {
-        sub_imu = n->create_subscription<sensor_msgs::msg::Imu>(IMU_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)), imu_callback);
+        sub_imu_ = node_->create_subscription<sensor_msgs::msg::Imu>(
+            IMU_TOPIC, rclcpp::QoS(rclcpp::KeepLast(2000)), imu_callback);
     }
-    auto sub_feature = n->create_subscription<sensor_msgs::msg::PointCloud>("/feature_tracker/feature", rclcpp::QoS(rclcpp::KeepLast(2000)), feature_callback);
-    auto sub_img0 = n->create_subscription<sensor_msgs::msg::Image>(IMAGE0_TOPIC, rclcpp::QoS(rclcpp::KeepLast(100)), img0_callback);
-    
-    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_img1 = NULL;
-    if(STEREO)
+    sub_feature_ = node_->create_subscription<sensor_msgs::msg::PointCloud>(
+        "/feature_tracker/feature", rclcpp::QoS(rclcpp::KeepLast(2000)), feature_callback);
+    sub_img0_ = node_->create_subscription<sensor_msgs::msg::Image>(
+        IMAGE0_TOPIC, rclcpp::QoS(rclcpp::KeepLast(100)), img0_callback);
+
+    if (STEREO)
     {
-        sub_img1 = n->create_subscription<sensor_msgs::msg::Image>(IMAGE1_TOPIC, rclcpp::QoS(rclcpp::KeepLast(100)), img1_callback);
+        sub_img1_ = node_->create_subscription<sensor_msgs::msg::Image>(
+            IMAGE1_TOPIC, rclcpp::QoS(rclcpp::KeepLast(100)), img1_callback);
     }
-    
-    auto sub_restart = n->create_subscription<std_msgs::msg::Bool>("/vins_restart", rclcpp::QoS(rclcpp::KeepLast(100)), restart_callback);
-    auto sub_imu_switch = n->create_subscription<std_msgs::msg::Bool>("/vins_imu_switch", rclcpp::QoS(rclcpp::KeepLast(100)), imu_switch_callback);
-    auto sub_cam_switch = n->create_subscription<std_msgs::msg::Bool>("/vins_cam_switch", rclcpp::QoS(rclcpp::KeepLast(100)), cam_switch_callback);
 
-    std::thread sync_thread{sync_process};
-    rclcpp::spin(n);
+    sub_restart_ = node_->create_subscription<std_msgs::msg::Bool>(
+        "/vins_restart", rclcpp::QoS(rclcpp::KeepLast(100)), restart_callback);
+    sub_imu_switch_ = node_->create_subscription<std_msgs::msg::Bool>(
+        "/vins_imu_switch", rclcpp::QoS(rclcpp::KeepLast(100)), imu_switch_callback);
+    sub_cam_switch_ = node_->create_subscription<std_msgs::msg::Bool>(
+        "/vins_cam_switch", rclcpp::QoS(rclcpp::KeepLast(100)), cam_switch_callback);
 
-    return 0;
+    vins_estimator_running.store(true);
+    sync_thread_ = std::thread(sync_process);
 }
+
+VinsEstimatorRunner::~VinsEstimatorRunner()
+{
+    vins_estimator_running.store(false);
+    if (sync_thread_.joinable())
+        sync_thread_.join();
+}
+
+class VinsEstimatorComponent : public rclcpp::Node
+{
+public:
+    explicit VinsEstimatorComponent(const rclcpp::NodeOptions & options)
+        : rclcpp::Node("vins_estimator_component_host", make_host_options(options)),
+          runner_(std::make_unique<VinsEstimatorRunner>(make_worker_options(options))),
+          executor_(make_executor_options(options))
+    {
+        executor_.add_node(runner_->node());
+        spin_thread_ = std::thread([this]() { executor_.spin(); });
+    }
+
+    ~VinsEstimatorComponent() override
+    {
+        executor_.cancel();
+        if (spin_thread_.joinable())
+            spin_thread_.join();
+        runner_.reset();
+    }
+
+private:
+    std::unique_ptr<VinsEstimatorRunner> runner_;
+    rclcpp::executors::SingleThreadedExecutor executor_;
+    std::thread spin_thread_;
+};
+
+}  // namespace vins
+
+RCLCPP_COMPONENTS_REGISTER_NODE(vins::VinsEstimatorComponent)

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(vins)
 
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_compile_options(-Wextra -Wpedantic)
 
 set(CMAKE_BUILD_TYPE Release)
@@ -9,6 +10,7 @@ set(CMAKE_BUILD_TYPE Release)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(rcpputils REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -22,6 +24,8 @@ find_package(image_transport REQUIRED)
 
 
 find_package(OpenCV REQUIRED)
+find_package(CURL REQUIRED)
+find_package(TIFF REQUIRED)
 find_package(Ceres QUIET)
 if(NOT Ceres_FOUND)
   set(VINS_FUSION_CERES_HINT "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ceres-install")
@@ -44,6 +48,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(Eigen3)
 include_directories(
   ${EIGEN3_INCLUDE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 
@@ -64,21 +69,37 @@ add_library(vins_lib
     src/initial/initial_sfm.cpp
     src/initial/initial_ex_rotation.cpp
     src/featureTracker/feature_tracker.cpp)
-target_link_libraries(vins_lib  ${OpenCV_LIBS} ${CERES_LIBRARIES})
+set_target_properties(vins_lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(vins_lib ${OpenCV_LIBS} ${CERES_LIBRARIES} CURL::libcurl TIFF::TIFF)
 
 ament_target_dependencies(vins_lib rclcpp rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
 
-add_executable(vins_node src/rosNodeTest.cpp)
+add_library(vins_node_component SHARED src/rosNodeTest.cpp)
+ament_target_dependencies(vins_node_component rclcpp rclcpp_components rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
+target_link_libraries(vins_node_component vins_lib)
+rclcpp_components_register_nodes(vins_node_component "vins::VinsEstimatorComponent")
+
+add_library(kitti_odom_test_component SHARED src/KITTIOdomTest.cpp)
+ament_target_dependencies(kitti_odom_test_component rclcpp rclcpp_components rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
+target_link_libraries(kitti_odom_test_component vins_lib)
+rclcpp_components_register_nodes(kitti_odom_test_component "vins::KittiOdomTestComponent")
+
+add_library(kitti_gps_test_component SHARED src/KITTIGPSTest.cpp)
+ament_target_dependencies(kitti_gps_test_component rclcpp rclcpp_components rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
+target_link_libraries(kitti_gps_test_component vins_lib)
+rclcpp_components_register_nodes(kitti_gps_test_component "vins::KittiGpsTestComponent")
+
+add_executable(vins_node src/vins_node_main.cpp)
 ament_target_dependencies(vins_node rclcpp rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
-target_link_libraries(vins_node vins_lib) 
+target_link_libraries(vins_node vins_node_component)
 
-add_executable(kitti_odom_test src/KITTIOdomTest.cpp)
+add_executable(kitti_odom_test src/kitti_odom_test_main.cpp)
 ament_target_dependencies(kitti_odom_test rclcpp rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
-target_link_libraries(kitti_odom_test vins_lib) 
+target_link_libraries(kitti_odom_test kitti_odom_test_component)
 
-add_executable(kitti_gps_test src/KITTIGPSTest.cpp)
+add_executable(kitti_gps_test src/kitti_gps_test_main.cpp)
 ament_target_dependencies(kitti_gps_test rclcpp rcpputils std_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_models image_transport)
-target_link_libraries(kitti_gps_test vins_lib) 
+target_link_libraries(kitti_gps_test kitti_gps_test_component)
 
 # added from DEBUG
 
@@ -100,9 +121,25 @@ install(
 
 # Install nodes
 install(
-  TARGETS vins_node kitti_odom_test kitti_gps_test
+  TARGETS
+    vins_node
+    kitti_odom_test
+    kitti_gps_test
   DESTINATION lib/${PROJECT_NAME}
 )
+
+install(
+  TARGETS
+    vins_node_component
+    kitti_odom_test_component
+    kitti_gps_test_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_export_libraries(vins_node_component kitti_odom_test_component kitti_gps_test_component)
+ament_export_dependencies(rclcpp_components)
 
 
 

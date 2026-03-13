@@ -34,3 +34,4 @@ include_directories(
 add_library(libGeographiccc src/LocalCartesian.cpp
                           src/Geocentric.cpp
                           src/Math.cpp)
+set_target_properties(libGeographiccc PROPERTIES POSITION_INDEPENDENT_CODE ON)

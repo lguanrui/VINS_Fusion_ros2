@@ -8,6 +8,7 @@ set(CMAKE_BUILD_TYPE Release)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_components REQUIRED)
 find_package(rcpputils REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -33,11 +34,11 @@ endif()
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 find_package(Eigen3)
 
-include_directories( ${CERES_INCLUDE_DIRS}  ${EIGEN3_INCLUDE_DIR}) #${catkin_INCLUDE_DIRS})
+include_directories(${CERES_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/src) #${catkin_INCLUDE_DIRS})
 
 
 
-add_executable(loop_fusion_node
+add_library(loop_fusion_component SHARED
     src/pose_graph_node.cpp
     src/pose_graph.cpp
     src/keyframe.cpp
@@ -55,9 +56,14 @@ add_executable(loop_fusion_node
 
     
 # added from DEBUG
-ament_target_dependencies(loop_fusion_node camera_models rclcpp rcpputils ament_index_cpp std_msgs sensor_msgs visualization_msgs nav_msgs cv_bridge OpenCV) # roslib) # does 'roslib' really need ??
+ament_target_dependencies(loop_fusion_component camera_models rclcpp rclcpp_components rcpputils ament_index_cpp std_msgs sensor_msgs visualization_msgs nav_msgs cv_bridge OpenCV) # roslib) # does 'roslib' really need ??
 
-target_link_libraries(loop_fusion_node ${OpenCV_LIBS} ${CERES_LIBRARIES} ) #${catkin_LIBRARIES}  )
+target_link_libraries(loop_fusion_component ${OpenCV_LIBS} ${CERES_LIBRARIES} ) #${catkin_LIBRARIES}  )
+rclcpp_components_register_nodes(loop_fusion_component "loop_fusion::LoopFusionComponent")
+
+add_executable(loop_fusion_node src/loop_fusion_node_main.cpp)
+ament_target_dependencies(loop_fusion_node rclcpp rclcpp_components rcpputils ament_index_cpp std_msgs sensor_msgs visualization_msgs nav_msgs cv_bridge camera_models OpenCV)
+target_link_libraries(loop_fusion_node loop_fusion_component)
 
 
 
@@ -66,6 +72,16 @@ install(
   TARGETS loop_fusion_node
   DESTINATION lib/${PROJECT_NAME}
 )
+
+install(
+  TARGETS loop_fusion_component
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_export_libraries(loop_fusion_component)
+ament_export_dependencies(rclcpp_components)
 
 
 

@@ -215,15 +215,13 @@ void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vec
     {
         mPropagate.lock();
         fastPredictIMU(t, linearAcceleration, angularVelocity);
-        pubLatestOdometry(latest_P, latest_Q, latest_V, t);
+        pubLatestOdometry(latest_P, latest_Q, latest_V, angularVelocity - latest_Bg, t);
         mPropagate.unlock();
     }
 }
 
 void Estimator::inputFeature(double t, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &featureFrame)
 {
-    ROS_ERROR("deprecated at VINS-Fusion");
-    assert(0);
     mBuf.lock();
     featureBuf.push(make_pair(t, featureFrame));
     mBuf.unlock();

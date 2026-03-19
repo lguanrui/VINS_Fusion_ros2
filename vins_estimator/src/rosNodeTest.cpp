@@ -168,10 +168,6 @@ void imu_callback(const sensor_msgs::msg::Imu::SharedPtr imu_msg)
 
 void feature_callback(const sensor_msgs::msg::PointCloud::SharedPtr feature_msg)
 {
-    std::cout << "feature cb" << std::endl;
-    std::cout << "Feature: " << feature_msg->points.size() << std::endl;
-
-
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     for (unsigned int i = 0; i < feature_msg->points.size(); i++)
     {
@@ -184,7 +180,7 @@ void feature_callback(const sensor_msgs::msg::PointCloud::SharedPtr feature_msg)
         double p_v = feature_msg->channels[3].values[i];
         double velocity_x = feature_msg->channels[4].values[i];
         double velocity_y = feature_msg->channels[5].values[i];
-        if(feature_msg->channels.size() > 5)
+        if(feature_msg->channels.size() > 8)
         {
             double gx = feature_msg->channels[6].values[i];
             double gy = feature_msg->channels[7].values[i];

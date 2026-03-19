@@ -84,6 +84,12 @@ void ensureDirectoryExists(const std::string & path)
         rcpputils::fs::create_directories(fs_path);
 }
 
+std::string getenvOrEmpty(const char * key)
+{
+    const char * value = std::getenv(key);
+    return value == nullptr ? std::string{} : std::string{value};
+}
+
 }  // namespace
 
 
@@ -153,6 +159,9 @@ void readParameters(std::string config_file)
     MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;
 
     fsSettings["output_path"] >> OUTPUT_FOLDER;
+    const std::string output_override = getenvOrEmpty("VINS_OUTPUT_PATH_OVERRIDE");
+    if (!output_override.empty())
+        OUTPUT_FOLDER = output_override;
     OUTPUT_FOLDER = expandUserPath(OUTPUT_FOLDER);
     ensureDirectoryExists(OUTPUT_FOLDER);
     VINS_RESULT_PATH = OUTPUT_FOLDER + "/vio.csv";

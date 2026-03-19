@@ -50,7 +50,12 @@ void registerPub(rclcpp::Node::SharedPtr n)
     cameraposevisual.setLineWidth(0.01);
 }
 
-void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, const Eigen::Vector3d &V, double t)
+void pubLatestOdometry(
+    const Eigen::Vector3d &P,
+    const Eigen::Quaterniond &Q,
+    const Eigen::Vector3d &V,
+    const Eigen::Vector3d &W,
+    double t)
 {
     nav_msgs::msg::Odometry odometry;
 
@@ -70,6 +75,9 @@ void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, co
     odometry.twist.twist.linear.x = V.x();
     odometry.twist.twist.linear.y = V.y();
     odometry.twist.twist.linear.z = V.z();
+    odometry.twist.twist.angular.x = W.x();
+    odometry.twist.twist.angular.y = W.y();
+    odometry.twist.twist.angular.z = W.z();
     pub_latest_odometry->publish(odometry);
 }
 
@@ -152,6 +160,10 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
         odometry.twist.twist.linear.x = estimator.Vs[WINDOW_SIZE].x();
         odometry.twist.twist.linear.y = estimator.Vs[WINDOW_SIZE].y();
         odometry.twist.twist.linear.z = estimator.Vs[WINDOW_SIZE].z();
+        const Eigen::Vector3d angular_velocity = estimator.gyr_0 - estimator.Bgs[WINDOW_SIZE];
+        odometry.twist.twist.angular.x = angular_velocity.x();
+        odometry.twist.twist.angular.y = angular_velocity.y();
+        odometry.twist.twist.angular.z = angular_velocity.z();
         pub_odometry->publish(odometry);
 
         geometry_msgs::msg::PoseStamped pose_stamped;
@@ -166,7 +178,7 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
         // write result to file
         ofstream foutC(VINS_RESULT_PATH, ios::app);
         foutC.setf(ios::fixed, ios::floatfield);
-        foutC.precision(0);
+        foutC.precision(9);
         foutC << header.stamp.sec + header.stamp.nanosec * (1e-9) << ",";
         foutC.precision(5);
         foutC << estimator.Ps[WINDOW_SIZE].x() << ","
@@ -178,7 +190,10 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
               << tmp_Q.z() << ","
               << estimator.Vs[WINDOW_SIZE].x() << ","
               << estimator.Vs[WINDOW_SIZE].y() << ","
-              << estimator.Vs[WINDOW_SIZE].z() << "," << endl;
+              << estimator.Vs[WINDOW_SIZE].z() << ","
+              << angular_velocity.x() << ","
+              << angular_velocity.y() << ","
+              << angular_velocity.z() << "," << endl;
         foutC.close();
         Eigen::Vector3d tmp_T = estimator.Ps[WINDOW_SIZE];
         printf("time: %f, t: %f %f %f q: %f %f %f %f \n", header.stamp.sec + header.stamp.nanosec * (1e-9),
@@ -418,58 +433,6 @@ void pubTF(const Estimator &estimator, const std_msgs::msg::Header &header)
 
 }
 
-
-// void pubTF(const Estimator &estimator, const std_msgs::msg::Header &header)
-// {
-//     if( estimator.solver_flag != Estimator::SolverFlag::NON_LINEAR)
-//         return;
-//     std::shared_ptr<tf2_ros::TransformBroadcaster> br;
-//     tf2::Transform transform;
-//     tf2::Quaternion q;
-//     // body frame
-//     Vector3d correct_t;
-//     Quaterniond correct_q;
-//     correct_t = estimator.Ps[WINDOW_SIZE];
-//     correct_q = estimator.Rs[WINDOW_SIZE];
-
-//     transform.setOrigin(tf2::Vector3(correct_t(0),
-//                                     correct_t(1),
-//                                     correct_t(2)));
-//     q.setW(correct_q.w());
-//     q.setX(correct_q.x());
-//     q.setY(correct_q.y());
-//     q.setZ(correct_q.z());
-//     transform.setRotation(q);
-//     // br->sendTransform(tf2::StampedTransform(transform, header.stamp, "world", "body"));
-//     br->sendTransform(tf2::StampedTransform(transform, header.stamp, "world", "body"));
-
-//     // camera frame
-//     transform.setOrigin(tf2::Vector3(estimator.tic[0].x(),
-//                                     estimator.tic[0].y(),
-//                                     estimator.tic[0].z()));
-//     q.setW(Quaterniond(estimator.ric[0]).w());
-//     q.setX(Quaterniond(estimator.ric[0]).x());
-//     q.setY(Quaterniond(estimator.ric[0]).y());
-//     q.setZ(Quaterniond(estimator.ric[0]).z());
-//     transform.setRotation(q);
-//     // br->sendTransform(tf2::StampedTransform(transform, header.stamp, "body", "camera"));
-//     br->sendTransform(tf2::StampedTransform(transform, header.stamp, "body", "camera"));
-
-    
-//     nav_msgs::msg::Odometry odometry;
-//     odometry.header = header;
-//     odometry.header.frame_id = "world";
-//     odometry.pose.pose.position.x = estimator.tic[0].x();
-//     odometry.pose.pose.position.y = estimator.tic[0].y();
-//     odometry.pose.pose.position.z = estimator.tic[0].z();
-//     Quaterniond tmp_q{estimator.ric[0]};
-//     odometry.pose.pose.orientation.x = tmp_q.x();
-//     odometry.pose.pose.orientation.y = tmp_q.y();
-//     odometry.pose.pose.orientation.z = tmp_q.z();
-//     odometry.pose.pose.orientation.w = tmp_q.w();
-//     pub_extrinsic->publish(odometry);
-
-// }
 
 void pubKeyframe(const Estimator &estimator)
 {

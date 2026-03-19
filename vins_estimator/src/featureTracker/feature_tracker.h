@@ -58,6 +58,7 @@ public:
     void readIntrinsicParameter(const vector<string> &calib_file);
     void showUndistortion(const string &name);
     void rejectWithF();
+    void rejectWithStereoEpipolar();
     void undistortedPoints();
     vector<cv::Point2f> undistortedPts(vector<cv::Point2f> &pts, camodocal::CameraPtr cam);
     vector<cv::Point2f> ptsVelocity(vector<int> &ids, vector<cv::Point2f> &pts, 

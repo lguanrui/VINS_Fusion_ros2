@@ -268,7 +268,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
 
     if (1)
     {
-        //rejectWithF();
+        rejectWithF();
         ROS_DEBUG("set mask begins");
         TicToc t_m;
         setMask();
@@ -431,6 +431,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             reduceVector(pts_velocity, status);
             */
             cur_un_right_pts = undistortedPts(cur_right_pts, m_camera[1]);
+            rejectWithStereoEpipolar();
             right_pts_velocity = ptsVelocity(ids_right, cur_un_right_pts, cur_un_right_pts_map, prev_un_right_pts_map);
             
         }
@@ -530,6 +531,46 @@ void FeatureTracker::rejectWithF()
         ROS_DEBUG("FM ransac: %d -> %lu: %f", size_a, cur_pts.size(), 1.0 * cur_pts.size() / size_a);
         ROS_DEBUG("FM ransac costs: %fms", t_f.toc());
     }
+}
+
+void FeatureTracker::rejectWithStereoEpipolar()
+{
+    if (!stereo_cam || ids_right.empty() || RIC.size() < 2 || TIC.size() < 2)
+        return;
+
+    const Matrix3d r_cam1_cam0 = RIC[1].transpose() * RIC[0];
+    const Vector3d t_cam1_cam0 = RIC[1].transpose() * (TIC[0] - TIC[1]);
+    if (t_cam1_cam0.norm() < 1e-9)
+        return;
+
+    const Matrix3d essential = Utility::skewSymmetric(t_cam1_cam0) * r_cam1_cam0;
+    const double sampson_threshold = 1.5 / FOCAL_LENGTH;
+    vector<uchar> status(ids_right.size(), 0);
+
+    for (size_t i = 0; i < ids_right.size(); i++)
+    {
+        const auto left_it = cur_un_pts_map.find(ids_right[i]);
+        if (left_it == cur_un_pts_map.end())
+            continue;
+
+        const Vector3d x0(left_it->second.x, left_it->second.y, 1.0);
+        const Vector3d x1(cur_un_right_pts[i].x, cur_un_right_pts[i].y, 1.0);
+        const Vector3d ex0 = essential * x0;
+        const Vector3d etx1 = essential.transpose() * x1;
+        const double denom = std::sqrt(
+            ex0.x() * ex0.x() + ex0.y() * ex0.y() +
+            etx1.x() * etx1.x() + etx1.y() * etx1.y());
+        if (denom < 1e-12)
+            continue;
+
+        const double sampson_error = std::abs(x1.dot(ex0)) / denom;
+        if (sampson_error < sampson_threshold)
+            status[i] = 1;
+    }
+
+    reduceVector(cur_right_pts, status);
+    reduceVector(cur_un_right_pts, status);
+    reduceVector(ids_right, status);
 }
 
 void FeatureTracker::readIntrinsicParameter(const vector<string> &calib_file)

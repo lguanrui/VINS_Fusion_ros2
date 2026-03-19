@@ -337,6 +337,7 @@ VinsEstimatorRunner::~VinsEstimatorRunner()
     vins_estimator_running.store(false);
     if (sync_thread_.joinable())
         sync_thread_.join();
+    unregisterPub();
 }
 
 class VinsEstimatorComponent : public rclcpp::Node
@@ -356,6 +357,7 @@ public:
         executor_.cancel();
         if (spin_thread_.joinable())
             spin_thread_.join();
+        executor_.remove_node(runner_->node());
         runner_.reset();
     }
 
